@@ -2,3 +2,4 @@ account_password.txt
 app_password.txt
 credentials.json
 venv/
+__pycache__

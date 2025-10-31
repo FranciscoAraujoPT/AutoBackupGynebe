@@ -8,7 +8,7 @@ logger = log_config()
 
 SENDER = "mcaraujo@clinicagynebe.com.pt"
 RECIPIENTS = [
-    "quico.calado.araujo@gmail.com",
+    "francisco.g.calado.araujo@gmail.com",
     "ruka.araujo@gmail.com",
     "rui.earaujo@gmail.com",
     "mcaraujo@clinicagynebe.com.pt"
@@ -24,7 +24,8 @@ BODY_BASE = (
 ERROR_MESSAGES = {
     "1": "- Error sending backup to backup server.",
     "2": "- Error sending backup to google drive.",
-    "3": "- Error sending backup to backup server.\n- Error sending backup to google drive."
+    "3": "- Error sending backup to backup server.\n- Error sending backup to google drive.",
+    "4": "- Error making backup in the server"
 }
 
 def send_email(sender, password, recipients, subject, body):

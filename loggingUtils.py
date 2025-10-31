@@ -3,7 +3,7 @@ import logging.handlers
 import os
 import sys
 
-LOGFILE = "C:\\Users\\Servidor\\gynebeautobackup\\gynebeBot.log"
+LOGFILE = "C:\\Users\\Servidor\\AutoBackupGynebe\\gynebeBot.log"
 
 
 def log_config():
