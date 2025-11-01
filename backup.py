@@ -11,6 +11,7 @@ MAX_BACKUP_TIMEOUT = 120 * 60  # 120 minutes in seconds
 PROC_NAME = "DOCbaseBackupRestore.exe"
 PROC_LOCATION = r"C:\\Program Files (x86)\\Mobilwave\\Docbase"
 BACKUP_FOLDER = r"C:\\Users\\Servidor\\Desktop\\GynébeBackup"
+MAX_BACKUPS = 2  # keep only 2 newest backups
 
 logger = log_config()
 
@@ -26,6 +27,35 @@ def kill_previous_instances():
                 logger.info(f'Killed existing process: {proc.pid}')
         except (psutil.NoSuchProcess, psutil.ZombieProcess):
             logger.warning("Could not access a process while killing previous instances.")
+
+
+def cleanup_old_backups(folder: str, max_backups: int = 2):
+    """
+    Keep only the most recent 'max_backups' .bak files in the folder.
+    Deletes older ones based on modification time.
+    """
+    try:
+        files = [
+            os.path.join(folder, f)
+            for f in os.listdir(folder)
+            if f.lower().endswith(".bak") and os.path.isfile(os.path.join(folder, f))
+        ]
+
+        if len(files) <= max_backups:
+            return
+
+        # Sort newest first
+        files.sort(key=os.path.getmtime, reverse=True)
+
+        # Delete older ones
+        for old_file in files[max_backups:]:
+            try:
+                os.remove(old_file)
+                logger.info(f"Deleted old backup: {old_file}")
+            except Exception as e:
+                logger.warning(f"Could not delete old backup {old_file}: {e}")
+    except Exception as e:
+        logger.error(f"Error cleaning up old backups in {folder}: {e}")
 
 
 def create_backup_file():
@@ -69,6 +99,7 @@ def create_backup_file():
     for _ in range(30):
         if os.path.exists(backup_file):
             logger.info(f'Backup file created successfully: {backup_file}')
+            cleanup_old_backups(BACKUP_FOLDER, MAX_BACKUPS)
             return backup_file
         time.sleep(1)
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import time
 from loggingUtils import log_config
@@ -45,24 +44,57 @@ def upload_file(service, file_path):
             raise e
 
     logger.info(f"Uploaded {file_name} successfully!")
+
+    # Clean old backups and then empty trash
     cleanup_old_backups(service, keep_latest=2)
+
     return response["id"]
 
+
 def cleanup_old_backups(service, keep_latest=2):
-    query = f"'{FOLDER_ID}' in parents and fileExtension='{EXTENSION}'"
-    results = service.files().list(
-        q=query,
-        orderBy="createdTime asc",
-        supportsAllDrives=True
-    ).execute()
+    """
+    Deletes old backup files in the target folder, keeping only the newest 'keep_latest' backups.
+    After deletion, it empties the Drive trash.
+    """
+    try:
+        query = f"'{FOLDER_ID}' in parents and fileExtension='{EXTENSION}'"
+        results = service.files().list(
+            q=query,
+            orderBy="createdTime asc",
+            supportsAllDrives=True
+        ).execute()
 
-    files = results.get("files", [])
-    if len(files) <= keep_latest:
-        return
+        files = results.get("files", [])
+        if len(files) <= keep_latest:
+            logger.info("No old backups to delete.")
+            return
 
-    for f in files[:-keep_latest]:
-        service.files().delete(fileId=f["id"], supportsAllDrives=True).execute()
-        logger.info(f"Deleted old backup: {f['name']}")
+        # Delete oldest backups
+        for f in files[:-keep_latest]:
+            try:
+                service.files().delete(fileId=f["id"], supportsAllDrives=True).execute()
+                logger.info(f"Deleted old backup: {f['name']}")
+            except Exception as e:
+                logger.warning(f"Could not delete old backup {f['name']}: {e}")
+
+        empty_trash(service)
+
+    except Exception as e:
+        logger.error(f"Error cleaning up old backups: {e}")
+
+
+def empty_trash(service):
+    """
+    Permanently empties the Google Drive trash (for the authenticated account or Shared Drive).
+    """
+    try:
+        service.files().emptyTrash().execute()
+        logger.info("Google Drive trash has been emptied successfully.")
+    except HttpError as e:
+        logger.error(f"Failed to empty Google Drive trash: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error while emptying trash: {e}")
+
 
 if __name__ == "__main__":
     logger.info("=== Starting Google Drive upload (Shared Drive mode) ===")

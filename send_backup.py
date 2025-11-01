@@ -78,10 +78,43 @@ def copy_backup(local_file: str, target_folder: str, username: str = None, passw
         shutil.copy(local_file, target_folder)
         dest_path = os.path.join(target_folder, os.path.basename(local_file))
         logger.info(f"Copied backup file {local_file} to {dest_path}")
+
+        # === NEW: Keep only the two newest backups ===
+        cleanup_old_backups(target_folder)
+
         return dest_path
     except Exception as e:
         logger.error(f"Failed to copy backup file {local_file} to {target_folder}: {e}")
         raise
+
+
+def cleanup_old_backups(target_folder: str, max_backups: int = 2):
+    """
+    Keep only the most recent 'max_backups' files in the target folder.
+    Deletes older backups based on modification time.
+    """
+    try:
+        # Get list of files in the target folder
+        files = [os.path.join(target_folder, f) for f in os.listdir(target_folder)
+                 if os.path.isfile(os.path.join(target_folder, f))]
+
+        # Skip if there are fewer than or equal to max_backups
+        if len(files) <= max_backups:
+            return
+
+        # Sort by modification time (newest first)
+        files.sort(key=os.path.getmtime, reverse=True)
+
+        # Delete older ones
+        for old_file in files[max_backups:]:
+            try:
+                os.remove(old_file)
+                logger.info(f"Deleted old backup: {old_file}")
+            except Exception as e:
+                logger.warning(f"Could not delete old backup {old_file}: {e}")
+    except Exception as e:
+        logger.error(f"Error cleaning up old backups in {target_folder}: {e}")
+
 
 def main():
     # Test configuration
@@ -94,7 +127,7 @@ def main():
     try:
         logger.info("=== Starting backup test ===")
 
-        pattern = 'C:\\Users\\Servidor\\Desktop\\GynébeBackup\\MWFichaClinica'
+        pattern = 'C:\\Users\\Servidor\\Desktop\\GynébeBackup\\MWFichaClinica*'
         files = glob.glob(pattern)
 
         if not files:
@@ -103,6 +136,7 @@ def main():
         # Sort by modification time, newest first
         files.sort(key=os.path.getmtime, reverse=True)
         local_file = files[0]
+
         # Wake up the target PC
         wake_up_pc(mac_address)
 
