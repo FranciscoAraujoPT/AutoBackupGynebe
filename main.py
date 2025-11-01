@@ -21,7 +21,7 @@ LAST_EMAIL_KEY = 'lastSuccess'
 DIRECTORY = "C:\\Users\\Servidor\\Desktop\\GynébeBackup"
 
 def main():
-    result = 1
+    result = 0
     logger = log_config()
     try:
         with open("account_password.txt", "r") as file:
