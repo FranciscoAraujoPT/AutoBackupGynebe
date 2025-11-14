@@ -1,116 +1,170 @@
-#!/usr/bin/env python3
 import os
-import sys
 import time
-import psutil
-import subprocess
+import pyodbc
+import datetime
 from loggingUtils import log_config
+import threading
 
-# === CONFIG ===
-MAX_BACKUP_TIMEOUT = 120 * 60  # 120 minutes in seconds
-PROC_NAME = "DOCbaseBackupRestore.exe"
-PROC_LOCATION = r"C:\\Program Files (x86)\\Mobilwave\\Docbase"
-BACKUP_FOLDER = r"C:\\Users\\Servidor\\Desktop\\GynébeBackup"
-MAX_BACKUPS = 2  # keep only 2 newest backups
-
+# ===== LOGGING CONFIGURATION =====
 logger = log_config()
 
+# ===== CONFIG =====
+SERVER = "Servidor\\MW"
+DATABASE = "MWFichaClinica"
+USERNAME = "sa"
+BACKUP_FOLDER = r"C:\Users\Servidor\Desktop\GynébeBackup"
 
-def kill_previous_instances():
-    """
-    Kill any running instances of the backup process to avoid conflicts.
-    """
-    for proc in psutil.process_iter():
+
+# ===== FILESYSTEM PERMISSION TEST =====
+def test_folder_permissions(folder: str):
+    """Check if Python can write to the folder."""
+    try:
+        test_file = os.path.join(folder, "python_write_test.txt")
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+        logger.info(f"Python has write access to: {folder}")
+    except Exception as e:
+        logger.error(f"Python CANNOT write to backup folder: {folder}")
+        logger.error(f"Filesystem error: {e}", exc_info=True)
+
+
+# ===== HELPER FUNCTIONS =====
+def cleanup_old_backups(folder: str, max_backups: int = 3):
+    """Keep only the latest 'max_backups' .bak files."""
+    backups = sorted(
+        [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".bak")],
+        key=os.path.getmtime,
+        reverse=True,
+    )
+    for old_file in backups[max_backups:]:
         try:
-            if proc.name() == PROC_NAME:
-                proc.kill()
-                logger.info(f'Killed existing process: {proc.pid}')
-        except (psutil.NoSuchProcess, psutil.ZombieProcess):
-            logger.warning("Could not access a process while killing previous instances.")
+            os.remove(old_file)
+            logger.info(f"Deleted old backup: {old_file}")
+        except Exception as e:
+            logger.warning(f"Could not delete {old_file}: {e}")
 
 
-def cleanup_old_backups(folder: str, max_backups: int = 2):
+# ===== BACKUP FUNCTION =====
+def backup_database(server: str, database: str, username: str, password: str, backup_dir: str) -> str | None:
+    os.makedirs(backup_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")
+    backup_file = os.path.join(backup_dir, f"{database}_{timestamp}.bak")
+
+    conn_str = (
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={server};DATABASE=master;UID={username};PWD={password}"
+    )
+
+    backup_sql = f""" 
+        BACKUP DATABASE [{database}] 
+        TO DISK = N'{backup_file}' 
+        WITH NOFORMAT, NOINIT, 
+        NAME = N'{database}-Full Database Backup',
+        SKIP, NOREWIND, NOUNLOAD, STATS = 10; 
     """
-    Keep only the most recent 'max_backups' .bak files in the folder.
-    Deletes older ones based on modification time.
-    """
+    backup_sql.encode(encoding='UTF-8')
+
     try:
-        files = [
-            os.path.join(folder, f)
-            for f in os.listdir(folder)
-            if f.lower().endswith(".bak") and os.path.isfile(os.path.join(folder, f))
-        ]
+        logger.info(f"Connecting to SQL Server at {server}...")
+        def run_backup():
+            with pyodbc.connect(conn_str, autocommit=True) as conn:
+                cursor = conn.cursor()
 
-        if len(files) <= max_backups:
-            return
+                logger.info(f"Starting backup of '{database}' to: {backup_file}")
 
-        # Sort newest first
-        files.sort(key=os.path.getmtime, reverse=True)
+                try:
+                    cursor.execute(backup_sql)
+                    time.sleep(2)
+                    while cursor.nextset():
+                        pass
 
-        # Delete older ones
-        for old_file in files[max_backups:]:
-            try:
-                os.remove(old_file)
-                logger.info(f"Deleted old backup: {old_file}")
-            except Exception as e:
-                logger.warning(f"Could not delete old backup {old_file}: {e}")
-    except Exception as e:
-        logger.error(f"Error cleaning up old backups in {folder}: {e}")
+                except pyodbc.Error as sql_err:
+                    logger.error("SQL Server BACKUP command failed!")
+                    logger.error(f"ODBC Error: {sql_err}", exc_info=True)
 
+                    # Extract detailed SQL Server messages
+                    if hasattr(cursor, 'messages') and cursor.messages:
+                        logger.error("SQL Server returned the following messages:")
+                        for msg in cursor.messages:
+                            logger.error(str(msg))
 
-def create_backup_file():
-    """
-    Starts the backup process and waits for the backup file to be created.
-    Returns the path to the backup file if successful, None otherwise.
-    """
-    # Generate backup file path
-    backup_file = os.path.join(BACKUP_FOLDER, f"MWFichaClinica-{time.strftime('%d-%m-%Y')}.bak")
+                    return None
 
-    # Kill previous backup processes
-    kill_previous_instances()
+                logger.info("Backup operation completed on SQL Server.")
+                cursor.close()
 
-    # Remove previous backup file if it exists
-    if os.path.exists(backup_file):
-        os.remove(backup_file)
-        logger.info(f"Deleted existing backup file: {backup_file}")
+        # Poll backup progress
+        with pyodbc.connect(conn_str, autocommit=True) as progress_conn:
+            logger.info(f"Starting backup of '{database}'...")
+            progress_cursor = progress_conn.cursor()
 
-    # Build command to run the backup executable
-    backup_cmd = [os.path.join(PROC_LOCATION, PROC_NAME), backup_file]
+            backup_thread = threading.Thread(target=run_backup)
+            backup_thread.start()
 
-    # Start the backup process
-    try:
-        result = subprocess.Popen(backup_cmd)
-        logger.info(f'Started backup process: {PROC_NAME}')
+            while backup_thread.is_alive():
+                progress_cursor.execute("""
+                    SELECT percent_complete, 
+                        estimated_completion_time/1000/60 AS est_min_left
+                    FROM sys.dm_exec_requests
+                    WHERE command = 'BACKUP DATABASE';
+                """)
+                row = progress_cursor.fetchone()
+                if row:
+                    percent = round(row.percent_complete, 1)
+                    est_time = int(row.est_min_left or 0)
+                    logger.info(f"Progress: {percent}% complete, ~{est_time} min remaining...")
+                else:
+                    logger.info("Backup still initializing...")
+                time.sleep(5)
 
-        # Wait for process to finish with timeout
-        result.wait(timeout=MAX_BACKUP_TIMEOUT)
-
-    except subprocess.TimeoutExpired:
-        logger.error("Timeout waiting for backup process to finish")
-        return None
-    except FileNotFoundError:
-        logger.error(f"{PROC_NAME} not found at {PROC_LOCATION}")
-        return None
-    except Exception as e:
-        logger.error(f"Error starting backup process: {e}")
-        return None
-
-    # Wait briefly to ensure file creation
-    for _ in range(30):
-        if os.path.exists(backup_file):
-            logger.info(f'Backup file created successfully: {backup_file}')
-            cleanup_old_backups(BACKUP_FOLDER, MAX_BACKUPS)
-            return backup_file
+            backup_thread.join()
+            progress_conn.close()
         time.sleep(1)
 
-    logger.error(f"Backup file {backup_file} was not created!")
-    return None
+        # Verify file creation
+        if not os.path.exists(backup_file):
+            logger.error("Backup file DOES NOT exist after SQL reported success!")
+            return None
+
+        logger.info("Verifying backup integrity...")
+        verify_sql = f"RESTORE HEADERONLY FROM DISK = N'{backup_file}'"
+
+        with pyodbc.connect(conn_str, autocommit=True) as conn:
+            cur = conn.cursor()
+
+            try:
+                cur.execute(verify_sql)
+            except pyodbc.Error as v_err:
+                logger.error("RESTORE HEADERONLY verification failed!")
+                logger.error(f"ODBC Error: {v_err}", exc_info=True)
+                if hasattr(cur, 'messages') and cur.messages:
+                    logger.error("SQL Server returned the following messages:")
+                    for msg in cur.messages:
+                        logger.error(str(msg))
+                return None
+
+        logger.info(f"Backup completed and verified successfully: {backup_file}")
+        cleanup_old_backups(backup_dir, max_backups=3)
+        return backup_file
+
+    except Exception as e:
+        logger.error("Unexpected fatal error during backup!", exc_info=True)
+        return None
 
 
+# ===== MAIN EXECUTION =====
 if __name__ == "__main__":
-    logger.info("=== Starting backup process ===")
-    backup_file = create_backup_file()
-    if backup_file:
-        logger.info(f"Backup completed successfully: {backup_file}")
-    else:
-        logger.error("Backup failed or backup file was not created!")
+    logger.info("=== Starting SQL Server backup process ===")
+
+    # Test if Python can write to the folder BEFORE running SQL backup
+    test_folder_permissions(BACKUP_FOLDER)
+
+    try:
+        with open("database_password.txt", "r", encoding="utf-8") as file:
+            PASSWORD = file.readline().strip()
+    except Exception:
+        logger.error("Failed to read database_password.txt", exc_info=True)
+        raise
+
+    backup_database(SERVER, DATABASE, USERNAME, PASSWORD, BACKUP_FOLDER)

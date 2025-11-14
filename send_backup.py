@@ -88,7 +88,7 @@ def copy_backup(local_file: str, target_folder: str, username: str = None, passw
         raise
 
 
-def cleanup_old_backups(target_folder: str, max_backups: int = 2):
+def cleanup_old_backups(target_folder: str, max_backups: int = 1):
     """
     Keep only the most recent 'max_backups' files in the target folder.
     Deletes older backups based on modification time.
@@ -121,7 +121,7 @@ def main():
     mac_address = "F4:39:09:03:72:F6"
     host = "ServidorBackup"
     target_folder = r"\\SERVIDORBACKUP\ClinicaGynebeBackups\DOCbase"
-    username = "ServidorBackup\Admin"
+    username = r"ServidorBackup\Admin"
     password = "your_password"
 
     try:
@@ -131,7 +131,7 @@ def main():
         files = glob.glob(pattern)
 
         if not files:
-            raise FileNotFoundError(f"No files found with prefix MWFichaClinica in folder C:\\Users\\Servidor\\Desktop\\GynébeBackup\\")
+            raise FileNotFoundError(f"No files found with prefix MWFichaClinica in folder C:\\GynébeBackup")
 
         # Sort by modification time, newest first
         files.sort(key=os.path.getmtime, reverse=True)
@@ -147,6 +147,9 @@ def main():
             logger.warning("PC did not come online, aborting backup.")
             return
         
+        with open("account_password.txt", "r") as file:
+            password = file.readline()
+
         # Copy the backup file to the network share
         dest_path = copy_backup(local_file, target_folder, username, password)
         logger.info(f"Backup successfully copied to: {dest_path}")

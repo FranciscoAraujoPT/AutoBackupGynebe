@@ -1,5 +1,6 @@
 account_password.txt
 app_password.txt
 credentials.json
+database_password.txt
 venv/
 __pycache__

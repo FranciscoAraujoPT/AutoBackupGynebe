@@ -25,7 +25,8 @@ ERROR_MESSAGES = {
     "1": "- Error sending backup to backup server.",
     "2": "- Error sending backup to google drive.",
     "3": "- Error sending backup to backup server.\n- Error sending backup to google drive.",
-    "4": "- Error making backup in the server"
+    "4": "- Error making backup in the server",
+    "5": "- Error reading the credentials file"
 }
 
 def send_email(sender, password, recipients, subject, body):

@@ -1,5 +1,6 @@
 import os
 import time
+import glob
 from loggingUtils import log_config
 from tenacity import retry, wait_exponential, stop_after_attempt
 from googleapiclient.discovery import build
@@ -34,14 +35,20 @@ def upload_file(service, file_path):
     )
 
     response = None
+    last_progress = 0
+
     while response is None:
         try:
             status, response = request.next_chunk()
             if status:
-                logger.info(f"Progress: {int(status.progress() * 100)}%")
+                progress = int(status.progress() * 100)
+                if progress >= last_progress + 1:
+                    logger.info(f"Progress: {progress}%")
+                    last_progress = progress
         except HttpError as e:
             logger.warning(f"HTTP error {e.resp.status}, retrying...")
             raise e
+
 
     logger.info(f"Uploaded {file_name} successfully!")
 
@@ -61,7 +68,9 @@ def cleanup_old_backups(service, keep_latest=2):
         results = service.files().list(
             q=query,
             orderBy="createdTime asc",
-            supportsAllDrives=True
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
+            corpora="allDrives"
         ).execute()
 
         files = results.get("files", [])
@@ -100,8 +109,18 @@ if __name__ == "__main__":
     logger.info("=== Starting Google Drive upload (Shared Drive mode) ===")
     service = get_drive_service()
 
-    backup_file = r"C:\Users\Servidor\Desktop\GynébeBackup\MWFichaClinica-26-10-2025.bak"
+    pattern = 'C:\\Users\\Servidor\\Desktop\\GynébeBackup\\MWFichaClinica*'
+    files = glob.glob(pattern)
+
+    if not files:
+        raise FileNotFoundError(f"No files found with prefix MWFichaClinica in folder C:\\GynébeBackup")
+
+    # Sort by modification time, newest first
+    files.sort(key=os.path.getmtime, reverse=True)
+    backup_file = files[0]
     if not os.path.exists(backup_file):
         logger.error(f"Backup file not found: {backup_file}")
     else:
         upload_file(service, backup_file)
+
+    cleanup_old_backups(service, keep_latest=2)

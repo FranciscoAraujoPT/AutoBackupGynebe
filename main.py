@@ -1,9 +1,6 @@
 #!/usr/bin/python
-
 import sys
-import os
 import logging
-import logging.handlers
 import backup
 import time
 import traceback
@@ -18,15 +15,34 @@ USERNAME = r"ServidorBackup\Admin"
 
 MAXIMUM_FILES = 2
 LAST_EMAIL_KEY = 'lastSuccess'
-DIRECTORY = "C:\\Users\\Servidor\\Desktop\\GynébeBackup"
+DIRECTORY = r"C:\Users\Servidor\Desktop\GynébeBackup"
+
+# === SQL SERVER CONFIG ===
+SQL_SERVER = "SERVIDOR\\MW"
+SQL_DATABASE = "MWFichaClinica"
+SQL_USERNAME = "sa"
 
 def main():
     result = 0
     logger = log_config()
     try:
-        with open("account_password.txt", "r") as file:
-            PASSWORD = file.readline()
-        backup_file = backup.create_backup_file()
+        try:
+            with open("account_password.txt", "r") as file:
+                PASSWORD = file.readline()
+            with open("database_password.txt", "r", encoding="utf-8") as file:
+                SQL_PASSWORD = file.readline().strip()
+        except Exception as e:
+            logger.error(f"Failed to read credentials file: {e}")
+            result = 5
+            raise Exception
+
+        backup_file = backup.backup_database(
+            server=SQL_SERVER,
+            database=SQL_DATABASE,
+            username=SQL_USERNAME,
+            password=SQL_PASSWORD,
+            backup_dir=DIRECTORY,
+        )
 
         if backup_file is None:
             result = 4
